@@ -1,0 +1,13 @@
+{
+  "name": "awai-sadar-iyref2026",
+  "private": true,
+  "scripts": {
+    "backend": "python -m uvicorn web.backend.web:app --reload --port 8000",
+    "frontend": "cd web/frontend && npm run dev"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.13",
+    "tailwindcss": "^4.2.4"
+  }
+}

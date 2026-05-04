@@ -1,0 +1,24 @@
+# =========================
+# PYTHON / BACKEND
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# =========================
+# NODE.JS / FRONTEND
+# =========================
+node_modules/
+dist/
+build/
+.npm/
+
+# =========================
+# OS & EDITOR
+# =========================
+.DS_Store
+.vscode/
+*.log

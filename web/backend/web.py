@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import joblib
 import numpy as np
 from datetime import datetime
+import os
 
 # Inisiasi Aplikasi
 app = FastAPI(title="Awai Sadar Backend")
@@ -18,8 +19,10 @@ app.add_middleware(
 
 # 1. Load Model dan Scaler
 try:
-    rf_model = joblib.load("../../model/resilientnet_rf.joblib")
-    scaler = joblib.load("../../model/scaler.joblib")
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    MODEL_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "..", "model"))
+    rf_model = joblib.load(os.path.join(MODEL_DIR, "resilientnet_rf.joblib"))
+    scaler = joblib.load(os.path.join(MODEL_DIR, "scaler.joblib"))
     feat_imp_arr = rf_model.feature_importances_
 except Exception as e:
     print("Gagal memuat model. Pastikan path file benar.", e)

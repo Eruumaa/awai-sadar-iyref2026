@@ -4,5 +4,4 @@ scikit-learn==1.6.1
 pandas==2.2.2
 numpy==2.0.2
 joblib==1.5.3
-shap==0.44.1
 pydantic==2.6.1
