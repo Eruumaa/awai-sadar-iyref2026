@@ -1,42 +1,323 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+
+const defaultFormData = {
+  timestamp: '',
+  temperature: 29.0,
+  koordinat: '5.5501° N, 95.3193° E',
+  situasi: '',
+  TN: 24.0,
+  TX: 32.0,
+  TAVG: 28.0,
+  RH_AVG: 85.0,
+  RR: 0.0,
+  SS: 6.0,
+  FF_AVG: 2.0,
+  RR_LAG1: 0.0,
+  RR_3DAY: 0.0,
+  RR_7DAY: 0.0,
+};
+
+const statusMeta = {
+  AMAN: {
+    label: 'Aman',
+    icon: '✅',
+    description: 'Kondisi relatif stabil dan risiko rendah.',
+    classes: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100 ring-emerald-400/30',
+  },
+  WASPADA: {
+    label: 'Waspada',
+    icon: '⚠️',
+    description: 'Perlu pemantauan intensif, bahaya dapat meningkat.',
+    classes: 'border-amber-500/30 bg-amber-500/10 text-amber-100 ring-amber-400/30',
+  },
+  BAHAYA: {
+    label: 'Bahaya',
+    icon: '🚨',
+    description: 'Situasi kritis, segera ambil tindakan mitigasi.',
+    classes: 'border-rose-500/30 bg-rose-500/10 text-rose-100 ring-rose-400/30',
+  },
+};
+
+const parameterTips = {
+  temperature: 'Suhu saat ini mempengaruhi evaporasi, kelembapan, dan peluang kebakaran lahan.',
+  TN: 'Suhu minimum observasi membantu menilai pendinginan malam hari.',
+  TX: 'Suhu maksimum digunakan untuk deteksi panas ekstrem di siang hari.',
+  RH_AVG: 'Kelembapan relatif penting untuk menilai kondisi basah dan potensi hujan.',
+  RR: 'Curah hujan harian memperlihatkan kondisi hujan terbaru di lokasi.',
+  RR_3DAY: 'Hujan akumulasi 3 hari mengukur tren pembasahan jangka pendek.',
+  SS: 'Sinar matahari menunjukkan intensitas penyinaran yang dapat mempercepat pengeringan tanah.',
+  FF_AVG: 'Kecepatan angin mempengaruhi penyebaran api dan awan hujan.',
+};
+
+const formatDate = (date) => date.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+const formatTime = (date) => date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const formatShortTime = (date) => date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+const safeNumber = (value) => Number(value ?? 0);
+
+const initialTrend = [
+  { time: '06:00', temperature: 26.4, RH_AVG: 83, RR: 0.0 },
+  { time: '08:00', temperature: 27.8, RH_AVG: 81, RR: 0.0 },
+  { time: '10:00', temperature: 28.9, RH_AVG: 79, RR: 0.0 },
+  { time: '12:00', temperature: 30.2, RH_AVG: 76, RR: 0.0 },
+  { time: '14:00', temperature: 31.5, RH_AVG: 74, RR: 0.0 },
+  { time: '16:00', temperature: 31.1, RH_AVG: 76, RR: 0.2 },
+  { time: '18:00', temperature: 29.3, RH_AVG: 79, RR: 1.4 },
+  { time: '20:00', temperature: 28.2, RH_AVG: 82, RR: 0.0 },
+];
+
+const initialHistory = [
+  { id: 1, time: '06 Mei 2026 07:50', level: 'AMAN', message: 'Pemantauan normal, tidak ada fenomena kritis.', temperature: 29.3, humidity: 82, rain: 0.0 },
+  { id: 2, time: '06 Mei 2026 09:30', level: 'WASPADA', message: 'Kelembapan turun, suhu naik mendekati batas waspada.', temperature: 31.7, humidity: 78, rain: 0.0 },
+  { id: 3, time: '06 Mei 2026 12:10', level: 'BAHAYA', message: 'Suhu di atas 35°C di kombinasi angin kencang.', temperature: 36.2, humidity: 71, rain: 0.0 },
+];
+
+const getAutoFillFlags = (data) => {
+  return Object.keys(defaultFormData).reduce((flags, key) => {
+    if (key === 'timestamp') return { ...flags, [key]: true };
+    const isDefault = String(data[key]) === String(defaultFormData[key]);
+    return { ...flags, [key]: isDefault };
+  }, {});
+};
 
 export default function AwaiSadarApp() {
-  const [role, setRole] = useState('MASYARAKAT'); 
-  const [alerts, setAlerts] = useState([]);
+  const [role, setRole] = useState('MASYARAKAT');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-  
-  // State Autentikasi
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [token, setToken] = useState(null);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [toast, setToast] = useState(null);
+  const [banner, setBanner] = useState(null);
+  const [filterLevel, setFilterLevel] = useState('SEMUA');
+  const [statusConnection, setStatusConnection] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [systemTime, setSystemTime] = useState(new Date());
+  const [splashComplete, setSplashComplete] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const prevLevelRef = useRef('AMAN');
 
-  const [formData, setFormData] = useState({
-    koordinat: '5.5501° N, 95.3193° E', situasi: '', 
-    TN: 24.0, TX: 32.0, TAVG: 28.0, RH_AVG: 85.0, RR: 0.0, 
-    SS: 6.0, FF_AVG: 2.0, RR_LAG1: 0.0, RR_3DAY: 0.0, RR_7DAY: 0.0
+  const [alerts, setAlerts] = useState([]);
+  const [historyLog, setHistoryLog] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-history') : null;
+    return saved ? JSON.parse(saved) : initialHistory;
+  });
+  const [trendHistory, setTrendHistory] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-trend') : null;
+    return saved ? JSON.parse(saved) : initialTrend;
   });
 
-  const fetchAlerts = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/alerts');
-      const data = await response.json();
-      setAlerts(data.alerts);
-    } catch (error) {
-      console.error("Gagal mengambil data", error);
-    }
+  const [formData, setFormData] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-form') : null;
+    const base = saved ? JSON.parse(saved) : defaultFormData;
+    return { ...defaultFormData, ...base, timestamp: formatTime(new Date()) };
+  });
+
+  const [autoFillMap, setAutoFillMap] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-form') : null;
+    const base = saved ? JSON.parse(saved) : defaultFormData;
+    return getAutoFillFlags(base);
+  });
+
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [token, setToken] = useState(null);
+
+  const computedScore = useMemo(() => {
+    const temp = safeNumber(formData.temperature);
+    let score = 0;
+    score += temp > 35 ? 3 : temp >= 30 ? 2 : 0;
+    score += safeNumber(formData.TAVG) >= 34 ? 1 : 0;
+    score += safeNumber(formData.RH_AVG) >= 90 ? 2 : safeNumber(formData.RH_AVG) >= 80 ? 1 : 0;
+    score += safeNumber(formData.RR_3DAY) >= 30 ? 2 : safeNumber(formData.RR_3DAY) >= 15 ? 1 : 0;
+    score += safeNumber(formData.FF_AVG) >= 4 ? 1 : 0;
+    score += safeNumber(formData.SS) >= 8 ? 1 : safeNumber(formData.SS) >= 5 ? 0.5 : 0;
+    return score;
+  }, [formData]);
+
+  const warningLevel = useMemo(() => {
+    if (computedScore >= 5) return 'BAHAYA';
+    if (computedScore >= 3) return 'WASPADA';
+    return 'AMAN';
+  }, [computedScore]);
+
+  const displayLogs = useMemo(() => {
+    if (filterLevel === 'SEMUA') return historyLog;
+    return historyLog.filter((item) => item.level === filterLevel);
+  }, [historyLog, filterLevel]);
+
+  const updateLocalStorage = (updatedForm, updatedHistory, updatedTrend) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('awai-form', JSON.stringify(updatedForm));
+    localStorage.setItem('awai-history', JSON.stringify(updatedHistory));
+    localStorage.setItem('awai-trend', JSON.stringify(updatedTrend));
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => setSplashComplete(true), 2000);
+    const progressTimer = setInterval(() => setLoadProgress((current) => Math.min(current + 14, 100)), 180);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(progressTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const timeInterval = setInterval(() => setSystemTime(new Date()), 1000);
+    return () => clearInterval(timeInterval);
+  }, []);
+
+  useEffect(() => {
+    const updateConnection = () => setStatusConnection(navigator.onLine);
+    window.addEventListener('online', updateConnection);
+    window.addEventListener('offline', updateConnection);
+    return () => {
+      window.removeEventListener('online', updateConnection);
+      window.removeEventListener('offline', updateConnection);
+    };
+  }, []);
+
+  useEffect(() => {
+    setFormData((prev) => ({
+      ...prev,
+      timestamp: formatTime(new Date()),
+      TAVG: autoFillMap.TAVG ? Number(((safeNumber(prev.TN) + safeNumber(prev.TX)) / 2).toFixed(1)) : prev.TAVG,
+      temperature: autoFillMap.temperature ? Number(((safeNumber(prev.TAVG) + safeNumber(prev.TN) + safeNumber(prev.TX)) / 3).toFixed(1)) : prev.temperature,
+    }));
+    setAutoFillMap((prev) => ({ ...prev, timestamp: true }));
+  }, [formData.TN, formData.TX, formData.TAVG, autoFillMap.TAVG, autoFillMap.temperature]);
+
+  useEffect(() => {
+    if (warningLevel !== prevLevelRef.current) {
+      if (warningLevel !== 'AMAN') {
+        setBanner({ level: warningLevel, message: `${statusMeta[warningLevel].icon} Status berubah menjadi ${statusMeta[warningLevel].label}!`, style: statusMeta[warningLevel].classes });
+      }
+      prevLevelRef.current = warningLevel;
+      const tone = warningLevel === 'BAHAYA' ? 880 : warningLevel === 'WASPADA' ? 480 : 0;
+      if (tone) {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = tone;
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          gain.gain.value = 0.12;
+          osc.start();
+          osc.stop(ctx.currentTime + 0.25);
+          setTimeout(() => ctx.close(), 300);
+        } catch {
+          // ignore audio error
+        }
+      }
+    }
+  }, [warningLevel]);
+
+  useEffect(() => {
+    if (!banner) return undefined;
+    const timer = setTimeout(() => setBanner(null), 7000);
+    return () => clearTimeout(timer);
+  }, [banner]);
+
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/api/alerts');
+        if (!response.ok) return;
+        const data = await response.json();
+        setAlerts(data.alerts || []);
+      } catch {
+        // fallback tanpa gangguan
+      }
+    };
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 5000); 
+    const interval = setInterval(fetchAlerts, 8000);
     return () => clearInterval(interval);
   }, []);
 
-  // Handler Input
-  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-  const handleLoginChange = (e) => setLoginForm({ ...loginForm, [e.target.name]: e.target.value });
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4200);
+  };
 
-  // Fungsi Login
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    setAutoFillMap((prev) => ({ ...prev, [name]: false }));
+  };
+
+  const handleSliderChange = (value) => {
+    setFormData((prev) => ({ ...prev, temperature: Number(value) }));
+    setAutoFillMap((prev) => ({ ...prev, temperature: false }));
+  };
+
+  const handleLoginChange = (e) => {
+    const { name, value } = e.target;
+    setLoginForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const persistState = (updatedForm, updatedHistory, updatedTrend) => {
+    updateLocalStorage(updatedForm, updatedHistory, updatedTrend);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!window.confirm('Anda akan menyimpan laporan kritis. Lanjutkan?')) return;
+    setIsLoading(true);
+    const entryTime = `${formatDate(systemTime)} ${formatShortTime(systemTime)}`;
+    const entry = {
+      id: Date.now(),
+      time: entryTime,
+      level: warningLevel,
+      message: formData.situasi || 'Laporan kondisi terbaru dari petugas BPBD.',
+      temperature: safeNumber(formData.temperature),
+      humidity: safeNumber(formData.RH_AVG),
+      rain: safeNumber(formData.RR_3DAY),
+    };
+    const newTrendPoint = { time: formatShortTime(systemTime), temperature: safeNumber(formData.temperature), RH_AVG: safeNumber(formData.RH_AVG), RR: safeNumber(formData.RR) };
+    const updatedHistory = [entry, ...historyLog].slice(0, 24);
+    const updatedTrend = [...trendHistory.slice(-11), newTrendPoint];
+
+    try {
+      if (!token) throw new Error('Token tidak tersedia');
+      const response = await fetch('http://localhost:8000/api/report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...formData,
+          TN: safeNumber(formData.TN),
+          TX: safeNumber(formData.TX),
+          TAVG: safeNumber(formData.TAVG),
+          RH_AVG: safeNumber(formData.RH_AVG),
+          RR: safeNumber(formData.RR),
+          SS: safeNumber(formData.SS),
+          FF_AVG: safeNumber(formData.FF_AVG),
+          RR_LAG1: safeNumber(formData.RR_LAG1),
+          RR_3DAY: safeNumber(formData.RR_3DAY),
+          RR_7DAY: safeNumber(formData.RR_7DAY),
+          timestamp: formData.timestamp,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Server menolak laporan');
+      }
+      showToast('Laporan berhasil dikirim dan dianalisis AI.', 'success');
+      persistState(formData, updatedHistory, updatedTrend);
+      setHistoryLog(updatedHistory);
+      setTrendHistory(updatedTrend);
+      setFormData((prev) => ({ ...prev, situasi: '' }));
+    } catch (error) {
+      showToast(`Gagal mengirim laporan: ${error.message}`, 'error');
+      if (error.message === 'Token tidak tersedia') {
+        persistState(formData, updatedHistory, updatedTrend);
+        setHistoryLog(updatedHistory);
+        setTrendHistory(updatedTrend);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -44,237 +325,365 @@ export default function AwaiSadarApp() {
       const response = await fetch('http://localhost:8000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm)
+        body: JSON.stringify(loginForm),
       });
       const data = await response.json();
-      
-      if (response.ok) {
-        setIsLoggedIn(true);
-        setToken(data.token);
-        setLoginForm({ username: '', password: '' });
-      } else {
-        alert(data.detail || 'Login Gagal');
-      }
+      if (!response.ok) throw new Error(data.detail || 'Login gagal');
+      setToken(data.token);
+      setIsLoggedIn(true);
+      setLoginForm({ username: '', password: '' });
+      showToast('Login berhasil. Anda dapat mengirim laporan.', 'success');
     } catch (error) {
-      alert('Gagal terhubung ke server');
+      showToast(error.message, 'error');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setToken(null);
-    setRole('MASYARAKAT');
-  };
+  const connectivityLabel = statusConnection ? 'Online' : 'Offline';
+  const connectivityBadge = statusConnection ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-slate-700/50 text-slate-200 border-slate-600';
 
-  // Fungsi Kirim Laporan AI
-  const submitReport = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      const response = await fetch('http://localhost:8000/api/report', {
-        method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` // Kirim token rahasia
-        },
-        body: JSON.stringify({
-            ...formData,
-            TN: parseFloat(formData.TN), TX: parseFloat(formData.TX), TAVG: parseFloat(formData.TAVG), 
-            RH_AVG: parseFloat(formData.RH_AVG), RR: parseFloat(formData.RR), SS: parseFloat(formData.SS),
-            FF_AVG: parseFloat(formData.FF_AVG), RR_LAG1: parseFloat(formData.RR_LAG1),
-            RR_3DAY: parseFloat(formData.RR_3DAY), RR_7DAY: parseFloat(formData.RR_7DAY)
-        })
-      });
-      
-      if (response.ok) {
-        setFormData({...formData, situasi: ''}); 
-        await fetchAlerts();
-        alert('✅ Laporan berhasil dikirim dan dianalisis AI!');
-      } else {
-        const errorData = await response.json();
-        alert(`❌ Gagal: ${errorData.detail}`);
-      }
-    } catch (error) {
-      alert('❌ Gagal mengirim laporan. Periksa koneksi.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const getRiskStyle = (status) => {
-    if (status === 'TINGGI') return { bg: 'bg-rose-50', border: 'border-rose-500', text: 'text-rose-700', badge: 'bg-rose-500 text-white' };
-    if (status === 'SEDANG') return { bg: 'bg-amber-50', border: 'border-amber-400', text: 'text-amber-700', badge: 'bg-amber-400 text-amber-900' };
-    return { bg: 'bg-emerald-50', border: 'border-emerald-500', text: 'text-emerald-700', badge: 'bg-emerald-500 text-white' };
-  };
+  if (!splashComplete) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-6">
+        <div className="rounded-[32px] border border-slate-700 bg-slate-900/95 p-10 w-full max-w-xl shadow-2xl ring-1 ring-slate-700/60 text-center">
+          <div className="mb-8">
+            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-cyan-400 text-4xl shadow-lg shadow-blue-500/20">⚡</div>
+            <h1 className="text-3xl font-extrabold tracking-tight">Awai Sadar EWS</h1>
+            <p className="mt-2 text-slate-400">Platform peringatan dini cuaca dan bencana alam real-time.</p>
+          </div>
+          <div className="relative h-3 rounded-full bg-slate-800 overflow-hidden mb-6">
+            <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-400 to-violet-400 animate-[pulse_2.5s_ease-in-out_infinite] opacity-70"></div>
+            <div className="h-full bg-gradient-to-r from-emerald-400 to-cyan-300 transition-all duration-700" style={{ width: `${loadProgress}%` }}></div>
+          </div>
+          <div className="flex items-center justify-center gap-3 text-sm text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Memuat data sistem, persiapkan lingkungan mitigasi...
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 selection:bg-blue-200">
-      {/* Navbar */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 shadow-sm flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-indigo-800 tracking-tight">Awai Sadar.AI</h1>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          {/* Switcher Role */}
-          <div className="flex bg-slate-100 p-1 rounded-full border border-slate-200 shadow-inner">
-            <button 
-              className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-all duration-300 ${role === 'MASYARAKAT' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              onClick={() => setRole('MASYARAKAT')}
-            >Masyarakat</button>
-            <button 
-              className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-all duration-300 ${role === 'PETUGAS' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              onClick={() => setRole('PETUGAS')}
-            >Otoritas BPBD</button>
-          </div>
-          {isLoggedIn && role === 'PETUGAS' && (
-            <button onClick={handleLogout} className="text-xs font-bold text-slate-400 hover:text-rose-600 underline underline-offset-2">Keluar</button>
-          )}
-        </div>
-      </header>
-
-      <main className="p-6 max-w-5xl mx-auto pb-20">
-        {role === 'PETUGAS' ? (
-          /* ================= TAMPILAN OTORITAS (LOGIN & INPUT) ================= */
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {!isLoggedIn ? (
-              /* CARD LOGIN */
-              <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-3xl shadow-sm border border-slate-200 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 to-indigo-800"></div>
-                <div className="text-center mb-6">
-                    <h2 className="text-2xl font-bold text-slate-800">Portal Petugas</h2>
-                    <p className="text-slate-500 text-sm mt-1">Silakan masuk menggunakan ID BPBD Anda.</p>
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="lg:flex lg:min-h-screen">
+        <aside className={`transition-all duration-300 ${sidebarOpen ? 'w-72' : 'w-20'} hidden lg:block shrink-0 bg-slate-900/95 border-r border-slate-800`}>
+          <div className="flex h-full flex-col justify-between px-5 py-6">
+            <div>
+              <div className="flex items-center justify-between pb-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Sistem</p>
+                  <h2 className="mt-2 text-xl font-bold">Awai Sadar</h2>
                 </div>
-                <form onSubmit={handleLogin} className="space-y-5">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Username</label>
-                    <input type="text" name="username" value={loginForm.username} onChange={handleLoginChange} className="w-full border border-slate-300 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Password</label>
-                    <input type="password" name="password" value={loginForm.password} onChange={handleLoginChange} className="w-full border border-slate-300 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" required />
-                  </div>
-                  <button type="submit" disabled={isLoading} className="w-full bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-blue-800 transition-all duration-200 mt-2">
-                    {isLoading ? 'Memverifikasi...' : 'Masuk ke Sistem'}
-                  </button>
-                </form>
+                <button onClick={() => setSidebarOpen((open) => !open)} className="text-slate-400 hover:text-slate-100 transition-colors" title="Toggle sidebar">
+                  {sidebarOpen ? '◀' : '▶'}
+                </button>
               </div>
-            ) : (
-              /* CARD FORM INPUT (SETELAH LOGIN) */
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 relative overflow-hidden mt-4">
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-rose-500 to-orange-400"></div>
-                <h2 className="text-2xl font-bold text-slate-800 mb-1">Input Data Observasi Lapangan</h2>
-                <p className="text-slate-500 text-sm mb-6">Anda masuk sebagai petugas tervalidasi. Laporan akan diproses mesin prediktif AI.</p>
-                
-                <form onSubmit={submitReport} className="space-y-6">
-                  {/* ... (Isi Form Laporan persis seperti kode sebelumnya) ... */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="col-span-1 md:col-span-2 space-y-4 bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                      <h3 className="font-bold text-slate-700 flex items-center gap-2">👁️ Laporan Visual</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Titik Koordinat</label>
-                          <input type="text" name="koordinat" value={formData.koordinat} onChange={handleInputChange} className="w-full border border-slate-300 px-4 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" required />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Deskripsi Situasi</label>
-                          <input type="text" name="situasi" value={formData.situasi} onChange={handleInputChange} placeholder="Cth: Air sungai meluap..." className="w-full border border-slate-300 px-4 py-2.5 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" required />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="col-span-1 md:col-span-2">
-                       <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">📡 Parameter Cuaca</h3>
-                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                          <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Suhu Min (TN)</label><input type="number" step="0.1" name="TN" value={formData.TN} onChange={handleInputChange} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" /></div>
-                          <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Suhu Max (TX)</label><input type="number" step="0.1" name="TX" value={formData.TX} onChange={handleInputChange} className="w-full border border-slate-300 p-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" /></div>
-                          <div><label className="block text-[11px] font-bold text-rose-600 mb-1">Hujan Hari Ini</label><input type="number" step="0.1" name="RR" value={formData.RR} onChange={handleInputChange} className="w-full border border-rose-200 bg-rose-50 p-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" /></div>
-                          <div><label className="block text-[11px] font-bold text-rose-600 mb-1">Kelembapan (RH)</label><input type="number" step="0.1" name="RH_AVG" value={formData.RH_AVG} onChange={handleInputChange} className="w-full border border-rose-200 bg-rose-50 p-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" /></div>
-                          <div><label className="block text-[11px] font-bold text-rose-600 mb-1">Akumulasi 3 Hari</label><input type="number" step="0.1" name="RR_3DAY" value={formData.RR_3DAY} onChange={handleInputChange} className="w-full border border-rose-200 bg-rose-50 p-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-rose-500" /></div>
-                       </div>
-                    </div>
+              <nav className="space-y-2">
+                <button onClick={() => setRole('MASYARAKAT')} className={`w-full rounded-3xl px-4 py-3 text-left text-sm transition ${role === 'MASYARAKAT' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                  Dashboard Masyarakat
+                </button>
+                <button onClick={() => setRole('PETUGAS')} className={`w-full rounded-3xl px-4 py-3 text-left text-sm transition ${role === 'PETUGAS' ? 'bg-slate-800 text-rose-300' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+                  Panel Petugas
+                </button>
+              </nav>
+            </div>
+            <div className="rounded-3xl border border-slate-800 bg-slate-950/80 p-4 text-sm">
+              <p className="text-slate-500">Koneksi</p>
+              <p className={`mt-2 inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${connectivityBadge}`}>{connectivityLabel}</p>
+              <p className="mt-4 text-slate-400">Data terakhir diperbarui pada:</p>
+              <p className="mt-1 text-sm text-slate-200">{formatDate(systemTime)}</p>
+            </div>
+          </div>
+        </aside>
+
+        <div className="flex-1">
+          <header className="sticky top-0 z-40 border-b border-slate-800/70 bg-slate-950/95 backdrop-blur-xl px-4 py-4 lg:px-8">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Early Warning System</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <h1 className="text-2xl font-semibold text-white">Dashboard Awai Sadar</h1>
+                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusConnection ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-slate-700/70 bg-slate-800 text-slate-300'}`}>{connectivityLabel}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3 text-sm text-slate-400">
+                <div className="rounded-3xl bg-slate-900/80 px-4 py-2">{formatDate(systemTime)}</div>
+                <div className="rounded-3xl bg-slate-900/80 px-4 py-2">{formatTime(systemTime)}</div>
+                <button onClick={() => setSidebarOpen((open) => !open)} className="lg:hidden rounded-3xl bg-slate-900/80 px-4 py-2 text-slate-300">Menu</button>
+              </div>
+            </div>
+          </header>
+
+          <main className="px-4 py-6 lg:px-8">
+            {banner && (
+              <div className={`mb-6 rounded-3xl border p-4 shadow-sm ${banner.style}`}>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-semibold">{banner.message}</p>
+                    <p className="mt-1 text-sm opacity-80">Pantau parameter dan tindak lanjut secara cepat.</p>
                   </div>
-                  <button type="submit" disabled={isLoading} className="w-full bg-gradient-to-r from-rose-600 to-rose-700 text-white font-bold py-3.5 rounded-xl shadow-md hover:-translate-y-0.5 transition-all flex justify-center items-center disabled:opacity-70">
-                    {isLoading ? 'Menganalisis...' : 'Kirim Laporan & Analisis AI'}
-                  </button>
-                </form>
+                  <button onClick={() => setBanner(null)} className="text-sm text-slate-300 hover:text-white">Tutup</button>
+                </div>
               </div>
             )}
-          </div>
-        ) : (
-          /* ================= TAMPILAN MASYARAKAT (DASHBOARD) ================= */
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 mt-4">
-             {/* ... (Isi Dashboard Masyarakat persis seperti kode sebelumnya) ... */}
-            <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl mb-8 flex gap-4 items-start shadow-sm">
-               <div className="text-2xl mt-0.5">📢</div>
-               <div>
-                  <h4 className="font-bold text-indigo-900">Siaga Bencana Real-Time</h4>
-                  <p className="text-sm text-indigo-700 leading-relaxed mt-1">
-                    Informasi di bawah divalidasi langsung oleh petugas BPBD dan diproses oleh kecerdasan buatan.
-                  </p>
-               </div>
-            </div>
 
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-extrabold text-slate-800">Laporan Terkini</h2>
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <span className="text-xs font-semibold text-slate-500 tracking-wide uppercase">Live Sync Active</span>
-              </div>
-            </div>
-
-            {alerts.length === 0 ? (
-              <div className="text-center py-20 bg-white rounded-3xl border border-slate-200 border-dashed">
-                 <div className="text-4xl mb-3 opacity-50">🍃</div>
-                 <p className="text-slate-500 font-medium">Situasi aman. Belum ada laporan peringatan saat ini.</p>
-              </div>
-            ) : (
-              <div className="grid gap-6">
-                {alerts.map((alert, idx) => {
-                  const style = getRiskStyle(alert.analisis_ai.status);
-                  return (
-                    <div key={idx} className={`relative bg-white p-6 rounded-3xl shadow-sm border border-slate-200 overflow-hidden`}>
-                      <div className={`absolute left-0 top-0 bottom-0 w-2 ${style.badge}`}></div>
-                      <div className="pl-4">
-                        <div className="flex items-center gap-3 mb-3">
-                          <span className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full shadow-sm ${style.badge}`}>
-                            {alert.analisis_ai.icon} RISIKO {alert.analisis_ai.status}
-                          </span>
-                          <span className="text-xs font-medium text-slate-400">🕒 {alert.waktu} | 📍 {alert.koordinat}</span>
-                        </div>
-                        <p className="text-lg text-slate-800 font-medium mb-4">"{alert.situasi}"</p>
-                        
-                        <div className={`p-4 rounded-2xl ${style.bg} border ${style.border}`}>
-                          <div className="flex items-center justify-between mb-3">
-                            <p className={`font-bold text-sm flex items-center gap-2 ${style.text}`}>
-                              <span className="text-lg">🧠</span> Analisis Transparan AI
-                            </p>
-                            <span className="bg-white/60 px-2.5 py-1 rounded-md text-[10px] font-bold text-slate-600 border border-slate-200/50">
-                              Akurasi: {alert.analisis_ai.confidence}
-                            </span>
+            {role === 'PETUGAS' ? (
+              <div className="space-y-6">
+                {!isLoggedIn ? (
+                  <section className="rounded-[32px] border border-slate-800/80 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/40">
+                    <div className="mb-6 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm uppercase tracking-[0.4em] text-cyan-300/70">Petugas</p>
+                        <h2 className="mt-2 text-3xl font-semibold">Masuk ke Panel BPBD</h2>
+                      </div>
+                    </div>
+                    <form onSubmit={handleLogin} className="grid gap-5">
+                      <label className="block text-sm font-semibold text-slate-300">
+                        Username
+                        <input name="username" value={loginForm.username} onChange={handleLoginChange} className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none transition focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" required />
+                      </label>
+                      <label className="block text-sm font-semibold text-slate-300">
+                        Password
+                        <input type="password" name="password" value={loginForm.password} onChange={handleLoginChange} className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none transition focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" required />
+                      </label>
+                      <button type="submit" disabled={isLoading} className="inline-flex items-center justify-center rounded-3xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60">
+                        {isLoading ? 'Memverifikasi...' : 'Masuk Sekarang'}
+                      </button>
+                    </form>
+                  </section>
+                ) : (
+                  <section className="rounded-[32px] border border-slate-800/80 bg-slate-900/90 p-8 shadow-2xl shadow-slate-950/40">
+                    <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="text-sm uppercase tracking-[0.4em] text-rose-300/80">Laporan Observasi</p>
+                        <h2 className="mt-2 text-3xl font-semibold">Form Input Data Cuaca & Risiko</h2>
+                        <p className="mt-2 text-slate-400">Isi data lapangan dan sistem akan menghitung level peringatan otomatis.</p>
+                      </div>
+                      <div className="rounded-3xl border border-slate-800/70 bg-slate-950/80 px-4 py-3 text-sm text-slate-300">
+                        Status Koneksi: <span className={statusConnection ? 'text-emerald-300' : 'text-rose-300'}>{connectivityLabel}</span>
+                      </div>
+                    </div>
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                        <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-slate-950/80 p-6">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Informasi Utama</p>
+                              <h3 className="mt-1 text-xl font-semibold">Data Observasi</h3>
+                            </div>
+                            <span className="rounded-full border border-slate-700 bg-slate-800/80 px-3 py-1 text-xs text-slate-300">Auto</span>
                           </div>
-                          <ul className="space-y-2">
-                            {alert.analisis_ai.reasons.map((r, i) => (
-                              <li key={i} className={`text-sm font-medium flex gap-2 ${style.text} opacity-90`}>{r}</li>
-                            ))}
-                          </ul>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="block text-sm text-slate-300">
+                              Titik Koordinat
+                              <input name="koordinat" value={formData.koordinat} onChange={handleInputChange} className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" required />
+                            </label>
+                            <label className="block text-sm text-slate-300">
+                              Deskripsi Situasi
+                              <input name="situasi" value={formData.situasi} onChange={handleInputChange} className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" placeholder="Misalnya: Sungai mulai meluap" required />
+                            </label>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="block text-sm text-slate-300" title="Waktu sistem otomatis">
+                              Waktu & Tanggal
+                              <input name="timestamp" value={formData.timestamp} readOnly className="mt-2 w-full cursor-not-allowed rounded-3xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-slate-300" />
+                              <span className="mt-1 inline-flex rounded-full bg-slate-700/70 px-2 py-0.5 text-[11px] text-slate-300">Auto</span>
+                            </label>
+                            <label className="block text-sm text-slate-300" title={parameterTips.temperature}>
+                              Suhu Utama (°C)
+                              <input type="number" name="temperature" value={formData.temperature} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                              <span className="mt-1 inline-flex rounded-full bg-slate-700/70 px-2 py-0.5 text-[11px] text-slate-300">{warningLevel === 'BAHAYA' ? 'Penting' : 'Auto / Manual'}</span>
+                            </label>
+                          </div>
+                          <div className="space-y-4 rounded-3xl border border-slate-800/80 bg-slate-950/90 p-4">
+                            <div className="flex items-center justify-between text-sm text-slate-400">
+                              <span>Suhu</span>
+                              <span className="font-semibold text-slate-100">{formData.temperature.toFixed(1)}°C</span>
+                            </div>
+                            <input type="range" min="15" max="45" step="0.1" value={formData.temperature} onChange={(e) => handleSliderChange(e.target.value)} className="w-full accent-cyan-400" />
+                            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-500">
+                              <span>Normal</span>
+                              <span>Waspada</span>
+                              <span>Bahaya</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-slate-950/90 p-6">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block text-sm text-slate-300" title={parameterTips.TN}>
+                              TN (Suhu Min)
+                              <input type="number" name="TN" value={formData.TN} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                            <label className="block text-sm text-slate-300" title={parameterTips.TX}>
+                              TX (Suhu Max)
+                              <input type="number" name="TX" value={formData.TX} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                          </div>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block text-sm text-slate-300" title={parameterTips.RH_AVG}>
+                              RH (%)
+                              <input type="number" name="RH_AVG" value={formData.RH_AVG} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                            <label className="block text-sm text-slate-300" title={parameterTips.RR}>
+                              Hujan Harian (mm)
+                              <input type="number" name="RR" value={formData.RR} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                          </div>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block text-sm text-slate-300" title={parameterTips.RR_3DAY}>
+                              Hujan 3 Hari (mm)
+                              <input type="number" name="RR_3DAY" value={formData.RR_3DAY} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                            <label className="block text-sm text-slate-300" title={parameterTips.SS}>
+                              Sinar Matahari
+                              <input type="number" name="SS" value={formData.SS} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                          </div>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="block text-sm text-slate-300" title={parameterTips.FF_AVG}>
+                              Kecepatan Angin
+                              <input type="number" name="FF_AVG" value={formData.FF_AVG} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                            <label className="block text-sm text-slate-300" title="Perbandingan curah hujan satu hari sebelumnya">
+                              RR Struktur
+                              <input type="number" name="RR_LAG1" value={formData.RR_LAG1} onChange={handleInputChange} step="0.1" className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <button type="submit" disabled={isLoading} className="inline-flex w-full items-center justify-center rounded-3xl bg-cyan-500 px-6 py-4 text-base font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60">
+                        {isLoading ? 'Menganalisis laporan...' : 'Kirim Laporan & Simpan Riwayat'}
+                      </button>
+                    </form>
+                  </section>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <section className="rounded-[32px] border border-slate-800/80 bg-slate-900/90 p-6 shadow-2xl shadow-slate-950/40">
+                  <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3 text-slate-400">
+                        <span className="rounded-3xl bg-slate-800/70 px-3 py-2 text-xs uppercase tracking-[0.4em]">Ringkasan Sistem</span>
+                        <span className="text-xs">Status setiap saat</span>
+                      </div>
+                      <div className={`rounded-[32px] border p-6 shadow-xl shadow-slate-950/20 ${statusMeta[warningLevel].classes}`}>
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                          <div>
+                            <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Status Peringatan</p>
+                            <h2 className="mt-2 text-3xl font-semibold text-white">{statusMeta[warningLevel].icon} {statusMeta[warningLevel].label}</h2>
+                          </div>
+                          <div className="rounded-3xl bg-slate-950/70 px-4 py-2 text-sm text-slate-300">Skor: {computedScore.toFixed(1)}</div>
+                        </div>
+                        <p className="mt-4 text-slate-300">{statusMeta[warningLevel].description}</p>
+                        <div className="mt-6 flex flex-wrap gap-3 text-sm text-slate-300">
+                          <span className="inline-flex items-center gap-2 rounded-3xl bg-slate-950/80 px-4 py-2">✅ Aman &lt;30</span>
+                          <span className="inline-flex items-center gap-2 rounded-3xl bg-slate-950/80 px-4 py-2">⚠️ 30–35</span>
+                          <span className="inline-flex items-center gap-2 rounded-3xl bg-slate-950/80 px-4 py-2">🚨 &gt;35</span>
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {[
+                        { label: 'Suhu', value: `${formData.temperature.toFixed(1)}°C`, icon: '🌡️' },
+                        { label: 'RH', value: `${formData.RH_AVG.toFixed(1)}%`, icon: '💧' },
+                        { label: 'Hujan 3 hari', value: `${formData.RR_3DAY.toFixed(1)} mm`, icon: '☔' },
+                        { label: 'Angin', value: `${formData.FF_AVG.toFixed(1)} m/s`, icon: '🌬️' },
+                      ].map((metric) => (
+                        <div key={metric.label} className="rounded-3xl border border-slate-800/80 bg-slate-950/80 p-5">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-sm uppercase tracking-[0.35em] text-slate-500">{metric.label}</p>
+                              <p className="mt-2 text-2xl font-semibold text-white">{metric.value}</p>
+                            </div>
+                            <div className="rounded-3xl bg-slate-800/80 px-3 py-2 text-sm text-slate-300">{metric.icon}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+                <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+                  <div className="rounded-[32px] border border-slate-800/80 bg-slate-900/90 p-6 shadow-2xl shadow-slate-950/40">
+                    <div className="mb-6 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Tren Cuaca</p>
+                        <h3 className="mt-2 text-2xl font-semibold text-white">Grafik Perubahan Parameter</h3>
+                      </div>
+                      <span className="rounded-3xl bg-slate-800/70 px-3 py-2 text-sm text-slate-300">{trendHistory.length} titik data</span>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {['temperature', 'RH_AVG', 'RR'].map((key) => (
+                          <div key={key} className="rounded-3xl border border-slate-800/80 bg-slate-950/90 p-4">
+                            <p className="text-xs uppercase tracking-[0.35em] text-slate-500">{key === 'temperature' ? 'Suhu' : key === 'RH_AVG' ? 'Kelembapan' : 'Hujan'}</p>
+                            <p className="mt-2 text-lg font-semibold text-white">{key === 'temperature' ? `${formData.temperature.toFixed(1)}°C` : key === 'RH_AVG' ? `${formData.RH_AVG.toFixed(1)};%` : `${formData.RR.toFixed(1)} mm`}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-3xl border border-slate-800/80 bg-slate-950/80 p-5">
+                        <div className="flex items-center justify-between gap-4">
+                          <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Area Chart Sederhana</p>
+                          <span className="text-xs text-slate-400">Per 2 jam</span>
+                        </div>
+                        <div className="mt-5 grid h-52 grid-cols-8 items-end gap-2">
+                          {trendHistory.map((point, index) => {
+                            const height = Math.min(Math.max((point.temperature - 18) * 3.5, 8), 180);
+                            return (
+                              <div key={`${point.time}-${index}`} className="group relative flex flex-col items-center gap-2">
+                                <div className="h-full w-full rounded-3xl bg-cyan-500/20 transition-all duration-300 group-hover:bg-cyan-400/80" style={{ height }} />
+                                <span className="text-[10px] text-slate-400">{point.time}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-[32px] border border-slate-800/80 bg-slate-900/90 p-6 shadow-2xl shadow-slate-950/40">
+                    <div className="mb-6 flex items-center gap-3 text-slate-300">
+                      <span className="rounded-3xl bg-slate-800/70 px-3 py-2 text-xs uppercase tracking-[0.4em]">Log Event</span>
+                      <span className="text-xs text-slate-500">Filter status & detail cepat</span>
+                    </div>
+                    <div className="mb-6 flex flex-wrap items-center gap-3">
+                      {['SEMUA', 'AMAN', 'WASPADA', 'BAHAYA'].map((key) => (
+                        <button key={key} onClick={() => setFilterLevel(key)} className={`rounded-full px-4 py-2 text-sm transition ${filterLevel === key ? 'bg-cyan-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+                          {key === 'SEMUA' ? 'Semua' : key}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-4">
+                      {displayLogs.slice(0, 6).map((log) => (
+                        <div key={log.id} className="rounded-3xl border border-slate-800/80 bg-slate-950/80 p-4 transition hover:border-cyan-500/40">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-white">{log.message}</p>
+                              <p className="mt-1 text-xs text-slate-500">{log.time}</p>
+                            </div>
+                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${log.level === 'AMAN' ? 'bg-emerald-500/15 text-emerald-200' : log.level === 'WASPADA' ? 'bg-amber-500/15 text-amber-200' : 'bg-rose-500/15 text-rose-200'}`}>{log.level}</span>
+                          </div>
+                          <div className="mt-4 grid gap-3 sm:grid-cols-3 text-sm text-slate-400">
+                            <span>🌡️ {log.temperature.toFixed(1)}°C</span>
+                            <span>💧 {log.humidity.toFixed(1)}%</span>
+                            <span>☔ {log.rain.toFixed(1)} mm</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
               </div>
             )}
-          </div>
-        )}
-      </main>
+          </main>
+        </div>
+      </div>
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 rounded-3xl border px-5 py-4 text-sm shadow-2xl ${toast.type === 'success' ? 'bg-emerald-500/95 text-slate-950 border-emerald-300/40' : 'bg-rose-500/95 text-slate-950 border-rose-300/40'}`}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
