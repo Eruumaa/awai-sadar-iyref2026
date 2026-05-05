@@ -2,16 +2,15 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 const defaultFormData = {
   timestamp: '',
-  temperature: 29.0,
-  koordinat: '5.5501° N, 95.3193° E',
+  temperature: 0,
   situasi: '',
-  TN: 24.0,
-  TX: 32.0,
-  TAVG: 28.0,
-  RH_AVG: 85.0,
+  TN: 0,
+  TX: 0,
+  TAVG: 0,
+  RH_AVG: 0,
   RR: 0.0,
-  SS: 6.0,
-  FF_AVG: 2.0,
+  SS: 0.0,
+  FF_AVG: 0.0,
   RR_LAG1: 0.0,
   RR_3DAY: 0.0,
   RR_7DAY: 0.0,
@@ -236,6 +235,32 @@ export default function AwaiSadarApp() {
     setTimeout(() => setToast(null), 4200);
   };
 
+  const handleGetLocation = () => {
+  // Cek apakah browser mendukung GPS
+  if (!navigator.geolocation) {
+    alert("Browser kamu tidak mendukung fitur GPS.");
+    return;
+  }
+
+  // Mengambil titik koordinat saat ini
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      
+      // Memasukkan koordinat ke dalam state formData
+      // Pastikan fungsi setFormData ini sesuai dengan yang kamu pakai di kodinganmu
+      setFormData(prevData => ({
+        ...prevData,
+        koordinat: `${lat}, ${lng}`
+      }));
+    },
+    (error) => {
+      alert("Gagal mendapatkan lokasi. Pastikan izin lokasi (GPS) di-allow di browser!");
+    }
+  );
+};
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -348,7 +373,6 @@ export default function AwaiSadarApp() {
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-6">
         <div className="rounded-[32px] border border-slate-700 bg-slate-900/95 p-10 w-full max-w-xl shadow-2xl ring-1 ring-slate-700/60 text-center">
           <div className="mb-8">
-            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-cyan-400 text-4xl shadow-lg shadow-blue-500/20">⚡</div>
             <h1 className="text-3xl font-extrabold tracking-tight">Awai Sadar.AI</h1>
             <p className="mt-2 text-slate-400">Platform peringatan dini cuaca dan bencana alam real-time.</p>
           </div>
@@ -477,8 +501,51 @@ export default function AwaiSadarApp() {
                           </div>
                           <div className="grid gap-4 md:grid-cols-2">
                             <label className="block text-sm text-slate-300">
-                              Titik Koordinat
-                              <input name="koordinat" value={formData.koordinat} onChange={handleInputChange} className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-400/20" required />
+                              <div className="md:col-span-2"> {/* Pakai col-span-2 agar peta punya ruang lebar */}
+  <label className="block text-sm text-slate-300 mb-2">
+    Titik Lokasi GPS (Live)
+  </label>
+  
+  <div className="flex flex-col gap-4">
+    {/* Baris Input & Tombol */}
+    <div className="flex gap-2">
+      <input 
+        type="text" 
+        name="koordinat" 
+        value={formData.koordinat || ''} 
+        readOnly 
+        placeholder="Klik tombol untuk mendeteksi lokasi..."
+        className="w-full rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-cyan-400 outline-none cursor-not-allowed" 
+      />
+      <button 
+        type="button" 
+        onClick={handleGetLocation}
+        className="rounded-2xl bg-cyan-600 px-5 py-3 font-semibold text-white hover:bg-cyan-500 transition-colors flex items-center justify-center whitespace-nowrap shadow-lg shadow-cyan-500/20"
+      >
+        📍 Ambil GPS
+      </button>
+    </div>
+
+    {/* Live Maps Display (Otomatis muncul kalau koordinat sudah terisi) */}
+    {formData.koordinat && (
+      <div className="h-64 w-full overflow-hidden rounded-3xl border border-slate-800 relative shadow-inner">
+        <iframe
+          width="100%"
+          height="100%"
+          frameBorder="0"
+          style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }} 
+          src={`https://maps.google.com/maps?q=${formData.koordinat.split(',')[0]},${formData.koordinat.split(',')[1]}&t=&z=16&ie=UTF8&iwloc=&output=embed`}
+          allowFullScreen
+        ></iframe>
+        
+        {/* Overlay Label ala Radar/Cyber */}
+        <div className="absolute top-3 left-3 bg-slate-900/80 text-cyan-400 text-xs px-3 py-1 rounded-full border border-cyan-500/30 backdrop-blur-sm">
+          ● Live Tracking Active
+        </div>
+      </div>
+    )}
+  </div>
+</div>
                             </label>
                             <label className="block text-sm text-slate-300">
                               Deskripsi Situasi
