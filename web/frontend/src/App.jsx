@@ -114,10 +114,8 @@ export default function AwaiSadarApp() {
       {/* Navbar */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 shadow-sm flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-800 rounded-xl shadow-lg flex items-center justify-center text-white text-xl">🛡️</div>
           <div>
-            <h1 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-indigo-800 tracking-tight">Awai Sadar</h1>
-            <p className="text-xs text-slate-500 font-medium">Sistem Intelijen Mitigasi Krisis</p>
+            <h1 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-indigo-800 tracking-tight">Awai Sadar.AI</h1>
           </div>
         </div>
 
