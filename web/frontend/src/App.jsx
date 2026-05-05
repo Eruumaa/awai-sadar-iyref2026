@@ -265,7 +265,7 @@ export default function AwaiSadarApp() {
       id: Date.now(),
       time: entryTime,
       level: warningLevel,
-      message: formData.situasi || 'Laporan kondisi terbaru dari petugas BPBD.',
+      message: formData.situasi || 'Laporan kondisi terbaru dari petugas.',
       temperature: safeNumber(formData.temperature),
       humidity: safeNumber(formData.RH_AVG),
       rain: safeNumber(formData.RR_3DAY),
@@ -349,7 +349,7 @@ export default function AwaiSadarApp() {
         <div className="rounded-[32px] border border-slate-700 bg-slate-900/95 p-10 w-full max-w-xl shadow-2xl ring-1 ring-slate-700/60 text-center">
           <div className="mb-8">
             <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-cyan-400 text-4xl shadow-lg shadow-blue-500/20">⚡</div>
-            <h1 className="text-3xl font-extrabold tracking-tight">Awai Sadar EWS</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight">Awai Sadar.AI</h1>
             <p className="mt-2 text-slate-400">Platform peringatan dini cuaca dan bencana alam real-time.</p>
           </div>
           <div className="relative h-3 rounded-full bg-slate-800 overflow-hidden mb-6">
@@ -374,7 +374,7 @@ export default function AwaiSadarApp() {
               <div className="flex items-center justify-between pb-6">
                 <div>
                   <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Sistem</p>
-                  <h2 className="mt-2 text-xl font-bold">Awai Sadar</h2>
+                  <h2 className="mt-2 text-xl font-bold">Awai Sadar.AI</h2>
                 </div>
                 <button onClick={() => setSidebarOpen((open) => !open)} className="text-slate-400 hover:text-slate-100 transition-colors" title="Toggle sidebar">
                   {sidebarOpen ? '◀' : '▶'}
@@ -404,7 +404,7 @@ export default function AwaiSadarApp() {
               <div>
                 <p className="text-xs uppercase tracking-[0.32em] text-slate-500">Early Warning System</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <h1 className="text-2xl font-semibold text-white">Dashboard Awai Sadar</h1>
+                  <h1 className="text-2xl font-semibold text-white">Dashboard Awai Sadar.AI</h1>
                   <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusConnection ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-slate-700/70 bg-slate-800 text-slate-300'}`}>{connectivityLabel}</span>
                 </div>
               </div>
@@ -436,7 +436,7 @@ export default function AwaiSadarApp() {
                     <div className="mb-6 flex items-center justify-between gap-4">
                       <div>
                         <p className="text-sm uppercase tracking-[0.4em] text-cyan-300/70">Petugas</p>
-                        <h2 className="mt-2 text-3xl font-semibold">Masuk ke Panel BPBD</h2>
+                        <h2 className="mt-2 text-3xl font-semibold">Masuk ke Panel Petugas</h2>
                       </div>
                     </div>
                     <form onSubmit={handleLogin} className="grid gap-5">
