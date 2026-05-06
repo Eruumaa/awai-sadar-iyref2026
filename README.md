@@ -32,6 +32,10 @@ Sistem ini bekerja melalui tiga fase utama:
 * **Explainable AI (XAI):** Menggunakan pendekatan SHAP untuk memberikan pemahaman mengapa sistem menentukan tingkat bahaya tertentu.
 * **Kedaulatan Data:** Mendukung kedaulatan data nasional dengan pemrosesan mandiri.
 
+## 🌐 MVP Website 
+MVP Dari Website ini sudah di deploy menggunakan backend di render.com dan frontend di github pages dengan link berikut:
+https://eruumaa.github.io/awai-sadar-iyref2026/
+
 ## 🚀 Instalasi & Penggunaan Lokal
 Ikuti langkah berikut untuk menjalankan MVP di perangkat lokal Anda:
 
