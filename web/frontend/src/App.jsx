@@ -696,7 +696,7 @@ export default function AwaiSadarApp() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       {[
                         { label: 'Suhu', value: `${formData.temperature.toFixed(1)}°C`, icon: '🌡️' },
-                        { label: 'RH', value: `${formData.RH_AVG.toFixed(1)}%`, icon: '💧' },
+                        { label: 'RH', value: `${formData.RH_AVG ? Number(formData.RH_AVG).toFixed(1) : '0.0'}%`, icon: '💧' },
                         { label: 'Hujan 3 hari', value: `${formData.RR_3DAY.toFixed(1)} mm`, icon: '☔' },
                         { label: 'Angin', value: `${formData.FF_AVG.toFixed(1)} m/s`, icon: '🌬️' },
                       ].map((metric) => (
