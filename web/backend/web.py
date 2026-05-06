@@ -5,6 +5,8 @@ import joblib
 import numpy as np
 from datetime import datetime
 import os
+import urllib.parse
+import urllib.request
 
 # Inisiasi Aplikasi
 app = FastAPI(title="Awai Sadar Backend")
@@ -40,6 +42,10 @@ FEATURE_LABELS = {
     'SS': 'Lama penyinaran matahari', 'TEMP_RANGE': 'Rentang suhu harian',
     'TN': 'Suhu minimum', 'FF_AVG': 'Kecepatan angin rata-rata',
 }
+
+FONNTE_PHONE = '6282292019390'
+FONNTE_API_KEY = os.getenv('FONNTE_API_KEY', '9CkDdQe655Y6D4FSGbYZ')
+FONNTE_URL = 'https://api.fonnte.com/send'      
 
 latest_alerts = []
 
@@ -91,6 +97,42 @@ def generate_explanation(sample_dict, pred, proba):
     return {"status": pred, "icon": icon, "confidence": f"{confidence:.1f}%", "reasons": reasons}
 
 # --- ENDPOINT REPORT (TERPROTEKSI LOGIN) ---
+def send_fonnte_notification(alert_record):
+    if not FONNTE_API_KEY:
+        return {"sent": False, "error": "FONNTE_API_KEY tidak dikonfigurasi"}
+
+    message = (
+        f"🚨 Laporan Risiko TINGGI\n"
+        f"Waktu: {alert_record['waktu']}\n"
+        f"Koordinat: {alert_record['koordinat']}\n"
+        f"Situasi: {alert_record['situasi']}\n"
+        f"Status AI: {alert_record['analisis_ai']['status']}\n"
+        f"Confidence: {alert_record['analisis_ai']['confidence']}\n"
+    )
+    params = {
+        'target': FONNTE_PHONE,
+        'message': message,
+
+    }
+    data = urllib.parse.urlencode(params).encode('utf-8')
+    req = urllib.request.Request(
+        FONNTE_URL,
+        data=data,
+        headers={
+            'Authorization': FONNTE_API_KEY,
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            body = response.read().decode('utf-8', errors='ignore')
+            sent = response.getcode() == 200 and ('sent' in body.lower() or 'ok' in body.lower() or 'success' in body.lower())
+            return {"sent": sent, "error": None if sent else f"Response: {body}"}
+    except Exception as err:
+        return {"sent": False, "error": str(err)}
+
+
 @app.post("/api/report")
 def submit_report(data: PetugasReport, authorization: str = Header(None)):
     # Cek apakah petugas mengirimkan token login yang valid
@@ -117,7 +159,17 @@ def submit_report(data: PetugasReport, authorization: str = Header(None)):
     }
     
     latest_alerts.insert(0, alert_record)
-    return {"message": "Laporan berhasil diproses AI", "data": alert_record}
+    if pred_risk == 'TINGGI':
+        fonnte_result = send_fonnte_notification(alert_record)
+        return {
+            "message": "Laporan berhasil diproses AI",
+            "data": alert_record,
+            "risk": pred_risk,
+            "fonnte_sent": fonnte_result['sent'],
+            "fonnte_error": fonnte_result['error'],
+        }
+
+    return {"message": "Laporan berhasil diproses AI", "data": alert_record, "risk": pred_risk, "fonnte_sent": False, "fonnte_error": None}
 
 # --- ENDPOINT MASYARAKAT (AKSES BEBAS) ---
 @app.get("/api/alerts")

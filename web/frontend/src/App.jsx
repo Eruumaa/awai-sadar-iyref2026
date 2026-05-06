@@ -70,6 +70,24 @@ const initialHistory = [
   { id: 3, time: '06 Mei 2026 12:10', level: 'BAHAYA', message: 'Suhu di atas 35°C di kombinasi angin kencang.', temperature: 36.2, humidity: 71, rain: 0.0 },
 ];
 
+const safeParseJSON = (value, fallback) => {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const numericFormKeys = ['temperature', 'TN', 'TX', 'TAVG', 'RH_AVG', 'RR', 'SS', 'FF_AVG', 'RR_LAG1', 'RR_3DAY', 'RR_7DAY'];
+
+const normalizeFormData = (data) => {
+  return {
+    ...data,
+    ...numericFormKeys.reduce((result, key) => ({ ...result, [key]: safeNumber(data[key]) }), {}),
+  };
+};
+
 const getAutoFillFlags = (data) => {
   return Object.keys(defaultFormData).reduce((flags, key) => {
     if (key === 'timestamp') return { ...flags, [key]: true };
@@ -94,24 +112,32 @@ export default function AwaiSadarApp() {
   const [alerts, setAlerts] = useState([]);
   const [historyLog, setHistoryLog] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-history') : null;
-    return saved ? JSON.parse(saved) : initialHistory;
+    const parsed = saved ? safeParseJSON(saved, null) : null;
+    return Array.isArray(parsed) ? parsed : initialHistory;
   });
   const [trendHistory, setTrendHistory] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-trend') : null;
-    return saved ? JSON.parse(saved) : initialTrend;
+    const parsed = saved ? safeParseJSON(saved, null) : null;
+    return Array.isArray(parsed) ? parsed : initialTrend;
   });
 
   const [formData, setFormData] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-form') : null;
-    const base = saved ? JSON.parse(saved) : defaultFormData;
-    return { ...defaultFormData, ...base, timestamp: formatTime(new Date()) };
+    const base = saved ? safeParseJSON(saved, defaultFormData) : defaultFormData;
+    const normalizedBase = normalizeFormData(base);
+    return { ...defaultFormData, ...normalizedBase, timestamp: formatTime(new Date()) };
   });
 
   const [autoFillMap, setAutoFillMap] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('awai-form') : null;
-    const base = saved ? JSON.parse(saved) : defaultFormData;
+    const base = saved ? safeParseJSON(saved, defaultFormData) : defaultFormData;
     return getAutoFillFlags(base);
   });
+
+  const coordParts = String(formData.koordinat || '').split(',').map((part) => part.trim());
+  const mapLatitude = coordParts[0] || '';
+  const mapLongitude = coordParts[1] || '';
+  const hasValidCoordinates = Boolean(mapLatitude && mapLongitude);
 
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -134,6 +160,9 @@ export default function AwaiSadarApp() {
     if (computedScore >= 3) return 'WASPADA';
     return 'AMAN';
   }, [computedScore]);
+
+  const safeWarningLevel = statusMeta[warningLevel] ? warningLevel : 'AMAN';
+  const activeStatus = statusMeta[safeWarningLevel];
 
   const displayLogs = useMemo(() => {
     if (filterLevel === 'SEMUA') return historyLog;
@@ -184,7 +213,7 @@ export default function AwaiSadarApp() {
   useEffect(() => {
     if (warningLevel !== prevLevelRef.current) {
       if (warningLevel !== 'AMAN') {
-        setBanner({ level: warningLevel, message: `${statusMeta[warningLevel].icon} Status berubah menjadi ${statusMeta[warningLevel].label}!`, style: statusMeta[warningLevel].classes });
+        setBanner({ level: warningLevel, message: `${activeStatus.icon} Status berubah menjadi ${activeStatus.label}!`, style: activeStatus.classes });
       }
       prevLevelRef.current = warningLevel;
       const tone = warningLevel === 'BAHAYA' ? 880 : warningLevel === 'WASPADA' ? 480 : 0;
@@ -217,7 +246,7 @@ export default function AwaiSadarApp() {
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/alerts');
+        const response = await fetch('http://localhost:8000/api/alerts');
         if (!response.ok) return;
         const data = await response.json();
         setAlerts(data.alerts || []);
@@ -263,7 +292,10 @@ export default function AwaiSadarApp() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [name]: numericFormKeys.includes(name) ? safeNumber(value) : value,
+    }));
     setAutoFillMap((prev) => ({ ...prev, [name]: false }));
   };
 
@@ -301,7 +333,7 @@ export default function AwaiSadarApp() {
 
     try {
       if (!token) throw new Error('Token tidak tersedia');
-      const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/report', {
+      const response = await fetch('http://localhost:8000/api/report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -322,11 +354,20 @@ export default function AwaiSadarApp() {
           timestamp: formData.timestamp,
         }),
       });
+      const responseData = await response.json();
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Server menolak laporan');
+        throw new Error(responseData.detail || 'Server menolak laporan');
       }
-      showToast('Laporan berhasil dikirim dan dianalisis AI.', 'success');
+      const { risk, fonnte_sent, fonnte_error } = responseData;
+      if (risk === 'TINGGI') {
+        if (fonnte_sent) {
+          showToast('Pesan WhatsApp risiko tinggi berhasil dikirim lewat server.', 'success');
+        } else {
+          showToast(`Risiko tinggi terdeteksi, namun WhatsApp gagal dikirim: ${fonnte_error || 'tanpa detail'}`, 'error');
+        }
+      } else {
+        showToast('Laporan berhasil dikirim dan dianalisis AI.', 'success');
+      }
       persistState(formData, updatedHistory, updatedTrend);
       setHistoryLog(updatedHistory);
       setTrendHistory(updatedTrend);
@@ -347,7 +388,7 @@ export default function AwaiSadarApp() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/login', {
+      const response = await fetch('http://localhost:8000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
@@ -527,14 +568,14 @@ export default function AwaiSadarApp() {
     </div>
 
     {/* Live Maps Display (Otomatis muncul kalau koordinat sudah terisi) */}
-    {formData.koordinat && (
+    {hasValidCoordinates && (
       <div className="h-64 w-full overflow-hidden rounded-3xl border border-slate-800 relative shadow-inner">
         <iframe
           width="100%"
           height="100%"
           frameBorder="0"
           style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }} 
-          src={`https://maps.google.com/maps?q=${formData.koordinat.split(',')[0]},${formData.koordinat.split(',')[1]}&t=&z=16&ie=UTF8&iwloc=&output=embed`}
+          src={`https://maps.google.com/maps?q=${encodeURIComponent(mapLatitude)},${encodeURIComponent(mapLongitude)}&t=&z=16&ie=UTF8&iwloc=&output=embed`}
           allowFullScreen
         ></iframe>
         
@@ -636,15 +677,15 @@ export default function AwaiSadarApp() {
                         <span className="rounded-3xl bg-slate-800/70 px-3 py-2 text-xs uppercase tracking-[0.4em]">Ringkasan Sistem</span>
                         <span className="text-xs">Status setiap saat</span>
                       </div>
-                      <div className={`rounded-[32px] border p-6 shadow-xl shadow-slate-950/20 ${statusMeta[warningLevel].classes}`}>
+                      <div className={`rounded-[32px] border p-6 shadow-xl shadow-slate-950/20 ${activeStatus.classes}`}>
                         <div className="flex flex-wrap items-center justify-between gap-4">
                           <div>
                             <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Status Peringatan</p>
-                            <h2 className="mt-2 text-3xl font-semibold text-white">{statusMeta[warningLevel].icon} {statusMeta[warningLevel].label}</h2>
+                            <h2 className="mt-2 text-3xl font-semibold text-white">{activeStatus.icon} {activeStatus.label}</h2>
                           </div>
                           <div className="rounded-3xl bg-slate-950/70 px-4 py-2 text-sm text-slate-300">Skor: {computedScore.toFixed(1)}</div>
                         </div>
-                        <p className="mt-4 text-slate-300">{statusMeta[warningLevel].description}</p>
+                        <p className="mt-4 text-slate-300">{activeStatus.description}</p>
                         <div className="mt-6 flex flex-wrap gap-3 text-sm text-slate-300">
                           <span className="inline-flex items-center gap-2 rounded-3xl bg-slate-950/80 px-4 py-2">✅ Aman &lt;30</span>
                           <span className="inline-flex items-center gap-2 rounded-3xl bg-slate-950/80 px-4 py-2">⚠️ 30–35</span>
