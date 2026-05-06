@@ -246,7 +246,7 @@ export default function AwaiSadarApp() {
   useEffect(() => {
     const fetchAlerts = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/alerts');
+        const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/alerts');
         if (!response.ok) return;
         const data = await response.json();
         setAlerts(data.alerts || []);
@@ -333,7 +333,7 @@ export default function AwaiSadarApp() {
 
     try {
       if (!token) throw new Error('Token tidak tersedia');
-      const response = await fetch('http://localhost:8000/api/report', {
+      const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -388,7 +388,7 @@ export default function AwaiSadarApp() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/login', {
+      const response = await fetch('https://awai-sadar-iyref2026.onrender.com/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(loginForm),
