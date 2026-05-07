@@ -36,6 +36,10 @@ Sistem ini bekerja melalui tiga fase utama:
 MVP Dari Website ini sudah di deploy menggunakan backend di render.com dan frontend di github pages dengan link berikut:
 https://eruumaa.github.io/awai-sadar-iyref2026/
 
+Login Panel Petugas
+Username: petugas
+Password: bpbd123
+
 ## 🚀 Instalasi & Penggunaan Lokal
 Ikuti langkah berikut untuk menjalankan MVP di perangkat lokal Anda:
 
